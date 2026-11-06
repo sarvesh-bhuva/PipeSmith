@@ -1,0 +1,89 @@
+parameters:
+  - name: stack
+    type: string
+  - name: workingDirectory
+    type: string
+  - name: runtimeVersion
+    type: string
+  - name: failOnSeverity
+    type: string
+
+jobs:
+  - job: SecretScan
+    displayName: Secret scanning (Gitleaks)
+    pool:
+      vmImage: ubuntu-latest
+    steps:
+      - checkout: self
+        fetchDepth: 0
+      - bash: |
+          set -euo pipefail
+          curl -sSfL -o /tmp/gitleaks.tgz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          tar -xzf /tmp/gitleaks.tgz -C /tmp gitleaks
+          /tmp/gitleaks detect --source "$(Build.SourcesDirectory)" --redact --exit-code 1 \
+            --report-format sarif --report-path "$(Build.ArtifactStagingDirectory)/gitleaks.sarif"
+        displayName: Scan source and history for secrets
+      - publish: $(Build.ArtifactStagingDirectory)
+        artifact: security-secrets
+        condition: succeededOrFailed()
+        continueOnError: true
+        displayName: Publish secret scan report
+
+  - job: SAST
+    displayName: SAST (Semgrep)
+    pool:
+      vmImage: ubuntu-latest
+    steps:
+      - checkout: self
+      - task: UsePythonVersion@0
+        inputs:
+          versionSpec: '3.12'
+      - bash: |
+          set -euo pipefail
+          python -m pip install --quiet "semgrep==${SEMGREP_VERSION}"
+          semgrep scan --config p/default --metrics=off --severity ERROR --error \
+            --sarif --output "$(Build.ArtifactStagingDirectory)/semgrep.sarif" \
+            "${{ parameters.workingDirectory }}"
+        displayName: Static analysis
+      - publish: $(Build.ArtifactStagingDirectory)
+        artifact: security-sast
+        condition: succeededOrFailed()
+        continueOnError: true
+        displayName: Publish SAST report
+
+  - job: SCA
+    displayName: Dependency scan
+    pool:
+      vmImage: ubuntu-latest
+    steps:
+      - checkout: self
+      - ${{ if eq(parameters.stack, 'node') }}:
+        - task: NodeTool@0
+          inputs:
+            versionSpec: ${{ parameters.runtimeVersion }}
+        - bash: |
+            set -euo pipefail
+            if [ ! -f package-lock.json ]; then
+              echo "##vso[task.logissue type=error]package-lock.json is required for dependency scanning"
+              exit 1
+            fi
+            npm audit --omit=dev --audit-level=${{ parameters.failOnSeverity }}
+          workingDirectory: ${{ parameters.workingDirectory }}
+          displayName: npm audit (fail on ${{ parameters.failOnSeverity }})
+      - ${{ if eq(parameters.stack, 'dotnet') }}:
+        - task: UseDotNet@2
+          inputs:
+            packageType: sdk
+            version: ${{ parameters.runtimeVersion }}
+        - bash: |
+            set -euo pipefail
+            dotnet restore
+            dotnet list package --vulnerable --include-transitive | tee /tmp/vulnerable.txt
+            pattern='\b(Critical)\b'
+            if [ "${{ parameters.failOnSeverity }}" = "high" ]; then pattern='\b(High|Critical)\b'; fi
+            if grep -Eq "$pattern" /tmp/vulnerable.txt; then
+              echo "##vso[task.logissue type=error]Vulnerable packages at or above ${{ parameters.failOnSeverity }}"
+              exit 1
+            fi
+          workingDirectory: ${{ parameters.workingDirectory }}
+          displayName: dotnet vulnerable packages (fail on ${{ parameters.failOnSeverity }})

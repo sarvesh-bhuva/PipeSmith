@@ -1,0 +1,32 @@
+parameters:
+  - name: target
+    type: string
+  - name: workingDirectory
+    type: string
+  - name: runtimeVersion
+    type: string
+
+steps:
+  - task: UseDotNet@2
+    inputs:
+      packageType: sdk
+      version: ${{ parameters.runtimeVersion }}
+  - bash: |
+      set -euo pipefail
+      dotnet restore
+      dotnet build -c Release --no-restore
+      dotnet publish -c Release --no-build -o "$(Build.ArtifactStagingDirectory)/app"
+    workingDirectory: ${{ parameters.workingDirectory }}
+    displayName: Restore, build and publish
+  - bash: |
+      set -euo pipefail
+      find "$(Build.SourcesDirectory)" -name '*Test*.csproj' -not -path '*/obj/*' -not -path '*/bin/*' | while read -r proj; do
+        dotnet test "$proj" -c Release
+      done
+    displayName: Run tests
+  - ${{ if in(parameters.target, 'staticwebapp', 'storage') }}:
+    - bash: |
+        set -euo pipefail
+        mv "$(Build.ArtifactStagingDirectory)/app" /tmp/publish
+        mv /tmp/publish/wwwroot "$(Build.ArtifactStagingDirectory)/app"
+      displayName: Keep static output only

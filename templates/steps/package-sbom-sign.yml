@@ -1,0 +1,35 @@
+parameters:
+  - name: workingDirectory
+    type: string
+
+steps:
+  - task: ArchiveFiles@2
+    displayName: Package app.zip
+    inputs:
+      rootFolderOrFile: $(Build.ArtifactStagingDirectory)/app
+      includeRootFolder: false
+      archiveType: zip
+      archiveFile: $(Build.ArtifactStagingDirectory)/drop/app.zip
+  - bash: |
+      set -euo pipefail
+      curl -sSfL -o /tmp/syft.tgz "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/syft_${SYFT_VERSION}_linux_amd64.tar.gz"
+      tar -xzf /tmp/syft.tgz -C /tmp syft
+      /tmp/syft scan "dir:$(Build.SourcesDirectory)/${{ parameters.workingDirectory }}" \
+        -o "spdx-json=$(Build.ArtifactStagingDirectory)/drop/sbom.spdx.json"
+    displayName: Generate SBOM (Syft)
+  - task: DownloadSecureFile@1
+    name: cosignKey
+    inputs:
+      secureFile: cosign.key
+  - bash: |
+      set -euo pipefail
+      curl -sSfL -o /tmp/cosign "https://github.com/sigstore/cosign/releases/download/v${COSIGN_VERSION}/cosign-linux-amd64"
+      chmod +x /tmp/cosign
+      cd "$(Build.ArtifactStagingDirectory)/drop"
+      for f in app.zip sbom.spdx.json; do
+        /tmp/cosign sign-blob --yes --tlog-upload=false --key "$(cosignKey.secureFilePath)" \
+          --output-signature "$f.sig" "$f"
+      done
+    env:
+      COSIGN_PASSWORD: $(COSIGN_PASSWORD)
+    displayName: Sign package and SBOM (Cosign)

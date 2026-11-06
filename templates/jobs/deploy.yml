@@ -1,0 +1,84 @@
+parameters:
+  - name: target
+    type: string
+  - name: appName
+    type: string
+  - name: azureSubscription
+    type: string
+  - name: environment
+    type: string
+
+jobs:
+  - deployment: Deploy
+    displayName: Verify signature and deploy
+    pool:
+      vmImage: ubuntu-latest
+    environment: ${{ parameters.environment }}
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+            - download: current
+              artifact: drop
+            - task: DownloadSecureFile@1
+              name: cosignPub
+              inputs:
+                secureFile: cosign.pub
+            - bash: |
+                set -euo pipefail
+                curl -sSfL -o /tmp/cosign "https://github.com/sigstore/cosign/releases/download/v${COSIGN_VERSION}/cosign-linux-amd64"
+                chmod +x /tmp/cosign
+                cd "$(Pipeline.Workspace)/drop"
+                for f in app.zip sbom.spdx.json; do
+                  /tmp/cosign verify-blob --key "$(cosignPub.secureFilePath)" \
+                    --signature "$f.sig" --insecure-ignore-tlog=true "$f"
+                done
+              displayName: Verify artifact and SBOM signatures
+
+            - ${{ if in(parameters.target, 'webapp', 'apiapp') }}:
+              - task: AzureWebApp@1
+                displayName: Deploy to App Service
+                inputs:
+                  azureSubscription: ${{ parameters.azureSubscription }}
+                  appType: webAppLinux
+                  appName: ${{ parameters.appName }}
+                  package: $(Pipeline.Workspace)/drop/app.zip
+
+            - ${{ if eq(parameters.target, 'functionapp') }}:
+              - task: AzureFunctionApp@2
+                displayName: Deploy to Function App
+                inputs:
+                  connectedServiceNameARM: ${{ parameters.azureSubscription }}
+                  appType: functionAppLinux
+                  appName: ${{ parameters.appName }}
+                  package: $(Pipeline.Workspace)/drop/app.zip
+
+            - ${{ if in(parameters.target, 'staticwebapp', 'storage') }}:
+              - task: ExtractFiles@1
+                displayName: Extract site
+                inputs:
+                  archiveFilePatterns: $(Pipeline.Workspace)/drop/app.zip
+                  destinationFolder: $(Pipeline.Workspace)/site
+                  cleanDestinationFolder: true
+
+            - ${{ if eq(parameters.target, 'staticwebapp') }}:
+              - task: AzureStaticWebApp@0
+                displayName: Deploy to Static Web App
+                inputs:
+                  workingDirectory: $(Pipeline.Workspace)/site
+                  app_location: /
+                  skip_app_build: true
+                  skip_api_build: true
+                  azure_static_web_apps_api_token: $(SWA_DEPLOYMENT_TOKEN)
+
+            - ${{ if eq(parameters.target, 'storage') }}:
+              - task: AzureCLI@2
+                displayName: Upload to storage static website
+                inputs:
+                  azureSubscription: ${{ parameters.azureSubscription }}
+                  scriptType: bash
+                  scriptLocation: inlineScript
+                  inlineScript: |
+                    az storage blob upload-batch --account-name "${{ parameters.appName }}" \
+                      --auth-mode login --destination '$web' \
+                      --source "$(Pipeline.Workspace)/site" --overwrite

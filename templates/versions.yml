@@ -1,0 +1,10 @@
+# Pinned tool versions. Bump here once and every pipeline picks it up on the next templates release.
+variables:
+  - name: GITLEAKS_VERSION
+    value: '8.18.4'
+  - name: SEMGREP_VERSION
+    value: '1.85.0'
+  - name: SYFT_VERSION
+    value: '1.14.0'
+  - name: COSIGN_VERSION
+    value: '2.4.1'

@@ -1,0 +1,13 @@
+{
+  "name": "pipesmith-node-demo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Demo app for PipeSmith. Pins a known-vulnerable lodash so the dependency gate fails on purpose.",
+  "main": "server.js",
+  "engines": { "node": ">=20" },
+  "scripts": { "start": "node server.js" },
+  "dependencies": {
+    "express": "4.21.2",
+    "lodash": "4.17.20"
+  }
+}

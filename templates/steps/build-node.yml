@@ -1,0 +1,37 @@
+parameters:
+  - name: target
+    type: string
+  - name: workingDirectory
+    type: string
+  - name: runtimeVersion
+    type: string
+  - name: buildOutput
+    type: string
+
+steps:
+  - task: NodeTool@0
+    inputs:
+      versionSpec: ${{ parameters.runtimeVersion }}
+  - bash: |
+      set -euo pipefail
+      npm ci
+      npm run build --if-present
+      npm test --if-present
+    workingDirectory: ${{ parameters.workingDirectory }}
+    env:
+      CI: 'true'
+    displayName: Install, build and test
+  - ${{ if in(parameters.target, 'staticwebapp', 'storage') }}:
+    - bash: |
+        set -euo pipefail
+        cp -r "${{ parameters.buildOutput }}" "$(Build.ArtifactStagingDirectory)/app"
+      workingDirectory: ${{ parameters.workingDirectory }}
+      displayName: Collect static output
+  - ${{ else }}:
+    - bash: |
+        set -euo pipefail
+        npm prune --omit=dev
+        mkdir -p "$(Build.ArtifactStagingDirectory)/app"
+        rsync -a --exclude .git ./ "$(Build.ArtifactStagingDirectory)/app/"
+      workingDirectory: ${{ parameters.workingDirectory }}
+      displayName: Collect app with production dependencies

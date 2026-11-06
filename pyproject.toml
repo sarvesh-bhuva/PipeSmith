@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pipesmith"
+version = "0.1.0"
+description = "Generate secure-by-default Azure DevOps CI/CD pipelines from a repository's tech stack"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+authors = [{ name = "Sarvesh Bhuva" }]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "pyyaml>=6"]
+
+[project.scripts]
+pipesmith = "pipesmith.cli:main"
+
+[tool.setuptools]
+packages = ["pipesmith"]

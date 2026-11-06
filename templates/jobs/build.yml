@@ -1,0 +1,43 @@
+parameters:
+  - name: stack
+    type: string
+  - name: target
+    type: string
+  - name: workingDirectory
+    type: string
+  - name: runtimeVersion
+    type: string
+  - name: buildOutput
+    type: string
+  - name: extraBuildSteps
+    type: stepList
+    default: []
+
+jobs:
+  - job: Build
+    displayName: Build and package
+    pool:
+      vmImage: ubuntu-latest
+    steps:
+      - checkout: self
+      - ${{ if eq(parameters.stack, 'dotnet') }}:
+        - template: ../steps/build-dotnet.yml
+          parameters:
+            target: ${{ parameters.target }}
+            workingDirectory: ${{ parameters.workingDirectory }}
+            runtimeVersion: ${{ parameters.runtimeVersion }}
+      - ${{ if eq(parameters.stack, 'node') }}:
+        - template: ../steps/build-node.yml
+          parameters:
+            target: ${{ parameters.target }}
+            workingDirectory: ${{ parameters.workingDirectory }}
+            runtimeVersion: ${{ parameters.runtimeVersion }}
+            buildOutput: ${{ parameters.buildOutput }}
+      - ${{ each step in parameters.extraBuildSteps }}:
+        - ${{ step }}
+      - template: ../steps/package-sbom-sign.yml
+        parameters:
+          workingDirectory: ${{ parameters.workingDirectory }}
+      - publish: $(Build.ArtifactStagingDirectory)/drop
+        artifact: drop
+        displayName: Publish signed package and SBOM

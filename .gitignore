@@ -1,0 +1,11 @@
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.venv/
+build/
+dist/
+node_modules/
+bin/
+obj/
+examples/*/config/
+cosign.key

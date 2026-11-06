@@ -1,0 +1,81 @@
+# PipeSmith org pipeline template.
+# Application pipelines extend this file. The security stage, SBOM, signing and
+# signature verification live here, so a calling pipeline cannot remove them.
+# Pair this with an Azure DevOps "Required template" check on each environment
+# and service connection so only pipelines extending this file can deploy.
+
+parameters:
+  - name: stack
+    type: string
+    values: [dotnet, node]
+  - name: target
+    type: string
+    values: [webapp, apiapp, functionapp, staticwebapp, storage]
+  - name: workingDirectory
+    type: string
+    default: '.'
+  - name: runtimeVersion
+    type: string
+  - name: buildOutput
+    type: string
+    default: ''
+  - name: appName
+    type: string
+  - name: azureSubscription
+    type: string
+  - name: environment
+    type: string
+    default: production
+  - name: failOnSeverity
+    type: string
+    default: high
+    values: [high, critical]
+  - name: variableGroup
+    type: string
+    default: pipesmith
+  - name: deployBranch
+    type: string
+    default: refs/heads/main
+  - name: extraBuildSteps
+    type: stepList
+    default: []
+
+variables:
+  - template: versions.yml
+  - group: ${{ parameters.variableGroup }}
+
+stages:
+  - stage: Security
+    displayName: Security gates
+    jobs:
+      - template: jobs/security.yml
+        parameters:
+          stack: ${{ parameters.stack }}
+          workingDirectory: ${{ parameters.workingDirectory }}
+          runtimeVersion: ${{ parameters.runtimeVersion }}
+          failOnSeverity: ${{ parameters.failOnSeverity }}
+
+  - stage: Build
+    displayName: Build, SBOM and sign
+    dependsOn: Security
+    jobs:
+      - template: jobs/build.yml
+        parameters:
+          stack: ${{ parameters.stack }}
+          target: ${{ parameters.target }}
+          workingDirectory: ${{ parameters.workingDirectory }}
+          runtimeVersion: ${{ parameters.runtimeVersion }}
+          buildOutput: ${{ parameters.buildOutput }}
+          extraBuildSteps: ${{ parameters.extraBuildSteps }}
+
+  - stage: Deploy
+    displayName: Verify and deploy
+    dependsOn: Build
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], '${{ parameters.deployBranch }}'))
+    jobs:
+      - template: jobs/deploy.yml
+        parameters:
+          target: ${{ parameters.target }}
+          appName: ${{ parameters.appName }}
+          azureSubscription: ${{ parameters.azureSubscription }}
+          environment: ${{ parameters.environment }}
